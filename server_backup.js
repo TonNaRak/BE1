@@ -296,7 +296,7 @@ app.get("/api/products", async (req, res) => {
   }
 });
 
-// GET: API สำหรับดึง Categories 
+// GET: API สำหรับดึง Categories (แบบ Public - เวอร์ชันอัปเดต)
 app.get("/api/public/categories", async (req, res) => {
   try {
     const sql = `
@@ -369,7 +369,7 @@ const areObjectsEqual = (obj1, obj2) => {
   return true;
 };
 
-// API สำหรับเพิ่มสินค้าลงตะกร้า
+// API สำหรับเพิ่มสินค้าลงตะกร้า (Logic ใหม่ทั้งหมดที่แม่นยำกว่าเดิม)
 app.post("/api/cart/add", authenticateToken, async (req, res) => {
   const { productId, quantity, selectedOptions } = req.body;
   const userId = req.user.userId;
@@ -703,7 +703,7 @@ app.post("/api/orders", authenticateToken, async (req, res) => {
   }
 });
 
-//  API สำหรับ "ซื้อทันที"
+// --- [จุดแก้ไขที่ 2] เพิ่ม API สำหรับ "ซื้อทันที" กลับเข้ามาใหม่ ---
 app.post("/api/orders/buy-now", authenticateToken, async (req, res) => {
   const { item, paymentMethod, shippingInfo, pointsToRedeem } = req.body;
   const userId = req.user.userId;
@@ -845,7 +845,8 @@ app.get("/api/orders/my-history", authenticateToken, async (req, res) => {
   const userId = req.user.userId;
   try {
     const ordersSql = `
-            SELECT * FROM Orders
+            SELECT order_id, total_price, status, order_date
+            FROM Orders
             WHERE user_id = ?
             ORDER BY order_date DESC
         `;
@@ -1308,9 +1309,10 @@ app.put(
   async (req, res) => {
     const { orderId } = req.params;
     const { status } = req.body;
-    const connection = await db.getConnection();
+    const connection = await db.getConnection(); // --- [เพิ่ม] ใช้ connection สำหรับ transaction
 
     try {
+      // --- [เพิ่ม] เริ่มต้น Transaction ---
       await connection.beginTransaction();
 
       // 1. อัปเดตสถานะออเดอร์
@@ -1321,6 +1323,7 @@ app.put(
         `;
       await connection.query(updateStatusSql, [status, status, orderId]);
 
+      // --- [เพิ่ม] Logic การให้แต้ม ---
       // 2. เช็คว่าสถานะที่เปลี่ยนเป็น 'processing' หรือไม่ (ซึ่งหมายถึงยืนยันการชำระเงินแล้ว)
       if (status === "processing") {
         // 2.1 ตรวจสอบก่อนว่าเคยให้แต้มสำหรับออเดอร์นี้ไปแล้วหรือยัง (ป้องกันการให้แต้มซ้ำ)
@@ -1366,6 +1369,7 @@ app.put(
       }
       // --- สิ้นสุด Logic การให้แต้ม ---
 
+      // --- [เพิ่ม] ยืนยัน Transaction ---
       await connection.commit();
       res.status(200).json({ message: "Order status updated successfully" });
     } catch (error) {
@@ -1388,6 +1392,7 @@ app.get(
     const { orderId } = req.params;
 
     try {
+      // --- จุดที่แก้ไข ---
       // เพิ่ม o.cash_received และ o.change_given เข้าไปใน SELECT statement
       const orderSql = `
             SELECT 
@@ -1699,6 +1704,9 @@ app.post(
         address: "In-store purchase",
       };
 
+      // --- จุดที่แก้ไข ---
+      // 1. เพิ่ม `subtotal` เข้าไปในคำสั่ง INSERT
+      // 2. เพิ่ม `totalPrice` เข้าไปใน list ของค่าที่จะใส่ (สำหรับ subtotal)
       const orderSql = `
             INSERT INTO Orders (user_id, subtotal, shipping_name, shipping_phone, shipping_address, total_price, status, payment_method, pay_date, order_date, cash_received, change_given) 
             VALUES (?, ?, ?, ?, ?, ?, 'completed', 'in_store', NOW(), NOW(), ?, ?)
@@ -1715,6 +1723,7 @@ app.post(
       ]);
       const newOrderId = orderResult.insertId;
 
+      // (โค้ดส่วนที่เหลือเหมือนเดิม)
       const orderItemsSql =
         "INSERT INTO Order_items (order_id, product_id, quantity, current_price, selected_options) VALUES ?";
       const orderItemsValues = items.map((item) => [
@@ -1802,6 +1811,7 @@ app.put(
       youtube_url,
       existing_image_url,
       existing_qr_code_url,
+      // [เพิ่ม] รับข้อมูลบัญชีจากฟอร์ม
       bank_name,
       account_name,
       account_number,
@@ -1826,6 +1836,7 @@ app.put(
     try {
       const [rows] = await db.query("SELECT id FROM StoreInfo WHERE id = 1");
       if (rows.length > 0) {
+        // [แก้ไข] เพิ่ม field บัญชีในคำสั่ง UPDATE
         const sql = `
           UPDATE StoreInfo SET 
             name = ?, name_en = ?, address = ?, address_en = ?, phone = ?, email = ?, 
@@ -1850,6 +1861,7 @@ app.put(
           account_number,
         ]);
       } else {
+        // [แก้ไข] เพิ่ม field บัญชีในคำสั่ง INSERT
         const sql = `
           INSERT INTO StoreInfo (id, name, name_en, address, address_en, phone, email, image_url, map_url, facebook_url, youtube_url, qr_code_url, bank_name, account_name, account_number)
           VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
